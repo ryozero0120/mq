@@ -14,12 +14,11 @@ import (
 
 type CdrHandler struct{}
 
-func (h *CdrHandler) Handle(ctx context.Context, m *mq.Msg) error {
+func (h *CdrHandler) Handle(ctx context.Context, m *mq.Message) error {
 	return nil
 }
 
 func main() {
-
 	client, err := mq.NewMQ(mq.MqConfig{
 		Connection: mq.ConnectionConfig{
 			URL:       "amqp://guest:guest@localhost:5672/",

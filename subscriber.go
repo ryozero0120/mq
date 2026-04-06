@@ -37,10 +37,10 @@ type Subscriber interface {
 }
 
 type Handler interface {
-	Handle(ctx context.Context, m *Msg) error
+	Handle(ctx context.Context, m *Message) error
 }
 
-type SubscribeHandler func(ctx context.Context, m *Msg) error
+type SubscribeHandler func(ctx context.Context, m *Message) error
 
 func NewSubscriber(cfg SubscriberConfig, conn Connection) Subscriber {
 	return &subscriber{
@@ -50,7 +50,7 @@ func NewSubscriber(cfg SubscriberConfig, conn Connection) Subscriber {
 }
 
 func (s *subscriber) Subscribe(ctx context.Context, h Handler) error {
-	if h != nil {
+	if h == nil {
 		return fmt.Errorf("handler cannot be nil")
 	}
 	s.handler = h
@@ -130,7 +130,7 @@ func (s *subscriber) doDelivery(ctx context.Context) {
 				return
 			}
 
-			dm := s.deliveryToMsg(d)
+			dm := s.deliveryToMessage(d)
 
 			if err := s.doMsg(ctx, dm); err != nil {
 				slog.Error("failed to do message", "error", err.Error())
@@ -145,18 +145,26 @@ func (s *subscriber) doDelivery(ctx context.Context) {
 	}
 }
 
-func (s *subscriber) doMsg(ctx context.Context, m *Msg) error {
+func (s *subscriber) doMsg(ctx context.Context, m *Message) error {
 	return s.handler.Handle(ctx, m)
 }
 
-func (s *subscriber) deliveryToMsg(d amqp.Delivery) *Msg {
+func (s *subscriber) deliveryToMessage(d amqp.Delivery) *Message {
 	headers := make(map[string]interface{})
 	for k, v := range d.Headers {
 		headers[k] = v
 	}
 
-	return &Msg{
-		ID:   d.MessageId,
-		Body: d.Body,
+	return &Message{
+		ID:              d.MessageId,
+		Headers:         headers,
+		Body:            d.Body,
+		ContentType:     d.ContentType,
+		ContentEncoding: d.ContentEncoding,
+		CorrelationID:   d.CorrelationId,
+		ReplyTo:         d.ReplyTo,
+		Timestamp:       d.Timestamp,
+		Priority:        d.Priority,
+		DeliveryMode:    DeliveryMode(d.DeliveryMode),
 	}
 }

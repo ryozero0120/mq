@@ -17,7 +17,7 @@ type publisher struct {
 }
 
 type Publisher interface {
-	Publish(ctx context.Context, m Msg) error
+	Publish(ctx context.Context, m Message) error
 	Close() error
 }
 
@@ -28,7 +28,7 @@ func NewPublisher(cfg PublisherConfig, pool ChannelPool) Publisher {
 	}
 }
 
-func (p *publisher) Publish(ctx context.Context, m Msg) error {
+func (p *publisher) Publish(ctx context.Context, m Message) error {
 	ch, err := p.channelPool.Acquire(ctx)
 	if err != nil {
 		return err

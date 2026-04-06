@@ -27,7 +27,7 @@ type ChannelPool interface {
 	Close() error
 }
 
-func NewChannelPool(cfg PoolConfig, conn Connection) ChannelPool {
+func NewChannelPool(cfg PoolConfig, conn Connection) (ChannelPool, error) {
 	pool := &channelPool{
 		cfg:        cfg,
 		connection: conn,
@@ -35,16 +35,17 @@ func NewChannelPool(cfg PoolConfig, conn Connection) ChannelPool {
 		closed:     false,
 	}
 
-	for i := 0; i < cfg.Max; i++ {
+	for i := 0; i < cfg.Min; i++ {
 		ch, err := pool.createChannel()
 		if err != nil {
 			pool.Close()
+			return nil, fmt.Errorf("failed to pre-populate channel pool: %w", err)
 		}
 
 		pool.channels <- ch
 	}
 
-	return pool
+	return pool, nil
 }
 
 func (p *channelPool) Acquire(ctx context.Context) (*amqp.Channel, error) {

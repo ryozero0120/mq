@@ -23,7 +23,10 @@ func NewMQ(cfg MqConfig) (MQ, error) {
 		return nil, err
 	}
 
-	chanPool := NewChannelPool(cfg.Pool, connection)
+	chanPool, err := NewChannelPool(cfg.Pool, connection)
+	if err != nil {
+		return nil, err
+	}
 
 	return &mq{
 		cfg:        cfg,
