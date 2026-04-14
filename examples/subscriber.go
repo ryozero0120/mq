@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"kit/mq"
 	"log"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/ryozero0120/mq"
 )
 
 type CdrHandler struct{}

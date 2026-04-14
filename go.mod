@@ -1,4 +1,4 @@
-module kit/mq
+module github.com/ryozero0120/mq
 
 go 1.23.2
 
