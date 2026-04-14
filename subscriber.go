@@ -76,7 +76,7 @@ func (s *subscriber) Start(ctx context.Context) error {
 		return err
 	}
 
-	s.deliveries, err = s.ch.Consume(s.cfg.Queue, s.cfg.Tag, s.cfg.AutoAck, true, false, false, nil)
+	s.deliveries, err = s.ch.Consume(s.cfg.Queue, s.cfg.Tag, s.cfg.AutoAck, false, false, false, nil)
 	if err != nil {
 		s.ch.Close()
 		return err
