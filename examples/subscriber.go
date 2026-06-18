@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/ryozero0120/mq"
+	"github.com/ryozero0120/mq/topology"
 )
 
 type CdrHandler struct{}
@@ -20,30 +22,84 @@ func (h *CdrHandler) Handle(ctx context.Context, m *mq.Message) error {
 }
 
 func main() {
-	client, err := mq.NewMQ(mq.MqConfig{
-		Connection: mq.ConnectionConfig{
-			URL:       "amqp://guest:guest@localhost:5672/",
-			Heartbeat: 10 * time.Second,
-		},
-	})
+	log.Print("ok")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	client, err := mq.NewMQ(
+		ctx,
+		mq.MqConfig{
+			Connection: mq.ConnectionConfig{
+				URL:       "amqp://guest:guest@localhost:5672/",
+				Heartbeat: 10 * time.Second,
+			},
+			Pool: mq.PoolConfig{
+				Min: 5,
+				Max: 20,
+			},
+		})
+	log.Print("ok")
+
 	if err != nil {
 		log.Fatal(err.Error())
 	}
 
 	defer client.Close()
 
-	log.Printf("runtime.NumCPU(): %d", runtime.NumCPU())
-
-	subscriber := client.Subscriber(mq.SubscriberConfig{
-		Queue:         "cdr.v1",
-		Tag:           fmt.Sprintf("C1_%s", time.Now().String()),
-		AutoAck:       true,
-		Concurrency:   runtime.NumCPU(),
-		PrefetchCount: runtime.NumCPU() * 2,
+	err = client.DeclareExchange(ctx, topology.ExchangeConfig{
+		Name:       "cdr",
+		Type:       "direct",
+		Durable:    true,
+		AutoDelete: false,
+		Internal:   false,
+		NoWait:     false,
+		Arguments:  map[string]interface{}{},
 	})
 
-	subscriber.Subscribe(context.Background(), &CdrHandler{})
-	if err := subscriber.Start(context.Background()); err != nil {
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	queue, err := client.DeclareQueue(ctx, topology.QueueConfig{
+		Name:       "cdr.v3",
+		Durable:    true,
+		AutoDelete: false,
+		Exclusive:  false,
+		NoWait:     false,
+		Arguments: map[string]interface{}{
+			amqp.QueueTypeArg: amqp.QueueTypeQuorum,
+		},
+	})
+
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	client.CreateBinding(ctx, topology.BindingConfig{
+		Queue:      queue.Name,
+		Exchange:   "cdr",
+		RoutingKey: "cdr.v3",
+		NoWait:     false,
+		Arguments:  map[string]interface{}{},
+	})
+
+	log.Printf("runtime.NumCPU(): %d", runtime.NumCPU())
+
+	hanlder := &CdrHandler{}
+
+	subscriber := client.Subscriber(
+		ctx,
+		mq.SubscriberConfig{
+			Queue:         queue.Name,
+			Tag:           fmt.Sprintf("C1_%s", time.Now().String()),
+			AutoAck:       false,
+			Concurrency:   5,
+			PrefetchCount: 5 * 8,
+			RequeueOnNack: true,
+		},
+		hanlder,
+	)
+
+	if err := subscriber.Start(ctx); err != nil {
 		log.Fatal(err.Error())
 	}
 	defer subscriber.Stop()
@@ -51,4 +107,6 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
+
+	cancel()
 }

@@ -7,6 +7,9 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/observability"
+	"github.com/ryozero0120/mq/reliability"
+	"github.com/ryozero0120/mq/worker"
 )
 
 type SubscriberConfig struct {
@@ -16,44 +19,58 @@ type SubscriberConfig struct {
 	PrefetchCount int
 	PrefetchSize  int
 	Concurrency   int
+	RequeueOnNack bool
 }
 
 type subscriber struct {
-	cfg     SubscriberConfig
-	conn    Connection
-	handler Handler
-
-	ch         *amqp.Channel
-	deliveries <-chan amqp.Delivery
-
-	wg     sync.WaitGroup
-	stopCh chan struct{}
+	conn        Connection
+	config      SubscriberConfig
+	logger      observability.Logger
+	handler     MessageHandler
+	workerPool  worker.Pool
+	ackManager  reliability.Acker
+	middlewares []SubscriberMiddleware
+	ch          *amqp.Channel
+	deliveries  <-chan amqp.Delivery
+	done        chan struct{}
+	wg          sync.WaitGroup
+	mu          sync.RWMutex
 }
 
 type Subscriber interface {
-	Subscribe(ctx context.Context, fn Handler) error
+	Subscribe(handler MessageHandler) error
 	Start(ctx context.Context) error
 	Stop() error
+	Use(middleware SubscriberMiddleware)
 }
 
-type Handler interface {
+type SubscriberFunc func(ctx context.Context, msg *Message) error
+
+type SubscriberMiddleware interface {
+	Intercept(ctx context.Context, msg *Message, next PublisherFunc) error
+}
+
+type MessageHandler interface {
 	Handle(ctx context.Context, m *Message) error
 }
 
 type SubscribeHandler func(ctx context.Context, m *Message) error
 
-func NewSubscriber(cfg SubscriberConfig, conn Connection) Subscriber {
+func NewSubscriber(conn Connection, config SubscriberConfig, logger observability.Logger, workerPool worker.Pool, ackManager reliability.Acker) Subscriber {
 	return &subscriber{
-		cfg:  cfg,
-		conn: conn,
+		conn:       conn,
+		config:     config,
+		logger:     logger,
+		workerPool: workerPool,
+		ackManager: ackManager,
 	}
 }
 
-func (s *subscriber) Subscribe(ctx context.Context, h Handler) error {
-	if h == nil {
+func (s *subscriber) Subscribe(handler MessageHandler) error {
+	if handler == nil {
 		return fmt.Errorf("handler cannot be nil")
 	}
-	s.handler = h
+	s.handler = handler
 
 	return nil
 }
@@ -71,38 +88,62 @@ func (s *subscriber) Start(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.ch.Qos(s.cfg.PrefetchCount, s.cfg.PrefetchSize, false); err != nil {
+	if err := s.ch.Qos(s.config.PrefetchCount, s.config.PrefetchSize, false); err != nil {
 		s.ch.Close()
 		return err
 	}
 
-	s.deliveries, err = s.ch.Consume(s.cfg.Queue, s.cfg.Tag, s.cfg.AutoAck, false, false, false, nil)
+	s.deliveries, err = s.ch.Consume(s.config.Queue, s.config.Tag, s.config.AutoAck, false, false, false, nil)
 	if err != nil {
 		s.ch.Close()
 		return err
 	}
+	slog.Info("worker pool start11")
+
+	if s.workerPool != nil {
+		go s.workerPool.Start()
+	}
 
 	s.wg.Add(1)
-
-	go s.doDelivery(ctx)
+	go s.doDeliveries(ctx)
 
 	return nil
 }
 
 func (s *subscriber) Stop() error {
-	slog.Error("subscriber stop")
-
-	close(s.stopCh)
+	close(s.done)
 
 	s.wg.Wait()
 
+	if s.workerPool != nil {
+		s.workerPool.Stop()
+	}
+
 	if s.ch != nil {
 		if err := s.ch.Close(); err != nil {
-			slog.Error("failed to close channel", "error", err.Error())
+			s.logger.Error("failed to close channel", "error", err.Error())
 		}
 	}
 
 	return nil
+}
+
+func (s *subscriber) Use(mw SubscriberMiddleware) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	s.middlewares = append(s.middlewares, mw)
+}
+
+func (s *subscriber) applyMiddleware(ctx context.Context, msg *Message, index int, next SubscriberFunc) error {
+	if index >= len(s.middlewares) {
+		return next(ctx, msg)
+	}
+
+	middleware := s.middlewares[index]
+	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *Message) error {
+		return s.applyMiddleware(ctx, msg, index+1, next)
+	})
 }
 
 func (s *subscriber) onconnected() {
@@ -113,40 +154,75 @@ func (s *subscriber) ondisconnected() {
 	// s.Start(context.Background())
 }
 
-func (s *subscriber) doDelivery(ctx context.Context) {
+func (s *subscriber) doDeliveries(ctx context.Context) {
 	defer s.wg.Done()
 
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("subscriber ctx done")
+			s.logger.Info("subscriber ctx done")
 			return
-		case <-s.stopCh:
-			slog.Info("subscriber stop chan")
+		case <-s.done:
+			s.logger.Info("subscriber stop chan")
 			return
 		case d, ok := <-s.deliveries:
 			if !ok {
-				slog.Error("delivery channel closed")
+				s.logger.Error("delivery channel closed")
 				return
 			}
 
-			dm := s.deliveryToMessage(d)
-
-			if err := s.doMsg(ctx, dm); err != nil {
-				slog.Error("failed to do message", "error", err.Error())
-			}
-
-			if !s.cfg.AutoAck {
-				if err := d.Ack(false); err != nil {
-					slog.Error("failed to ack message", "error", err.Error())
+			if s.workerPool != nil {
+				job := worker.NewTask(func(ctx context.Context) error {
+					return s.doDelivery(ctx, d)
+				})
+				if err := s.workerPool.Submit(job); err != nil {
+					if !s.config.AutoAck && s.ackManager != nil {
+						s.ackManager.Nack(d, s.config.RequeueOnNack)
+					}
 				}
+			} else {
+				s.doDelivery(ctx, d)
 			}
 		}
 	}
 }
 
-func (s *subscriber) doMsg(ctx context.Context, m *Message) error {
-	return s.handler.Handle(ctx, m)
+func (s *subscriber) doDelivery(ctx context.Context, d amqp.Delivery) error {
+	msg := s.deliveryToMessage(d)
+
+	var err error
+	if len(s.middlewares) > 0 {
+		err = s.applyMiddleware(ctx, msg, 0, s.doMsg)
+	} else {
+		err = s.doMsg(ctx, msg)
+	}
+
+	if err != nil {
+		return s.failed(ctx, d, msg, err)
+	}
+
+	if !s.config.AutoAck && s.ackManager != nil {
+		if err := s.ackManager.Ack(d); err != nil {
+			s.logger.Error("failed to ack message", "error", err.Error())
+		}
+	}
+
+	return nil
+}
+
+func (s *subscriber) doMsg(ctx context.Context, msg *Message) error {
+	err := s.handler.Handle(ctx, msg)
+	if err != nil {
+		s.logger.Error("failed to do message", "error", err.Error())
+	}
+	return err
+}
+
+func (s *subscriber) failed(_ context.Context, d amqp.Delivery, _ *Message, _ error) error {
+	if !s.config.AutoAck && s.ackManager != nil {
+		s.ackManager.Nack(d, false)
+	}
+	return nil
 }
 
 func (s *subscriber) deliveryToMessage(d amqp.Delivery) *Message {

@@ -9,13 +9,16 @@ import (
 type DeliveryMode uint8
 
 const (
-	Transient  DeliveryMode = 1
+	// Transient messages are not persisted to disk
+	Transient DeliveryMode = 1
+	// Persistent messages are persisted to disk
 	Persistent DeliveryMode = 2
 )
 
 type Context struct {
-	TraceID string
-	SpanID  string
+	TraceID    string
+	SpanID     string
+	RetryCount int
 }
 
 type Message struct {
@@ -34,7 +37,7 @@ type Message struct {
 
 func NewMessage() *Message {
 	return &Message{
-		ID:           uuid.NewString(),
+		ID:           uuid.New().String(),
 		Headers:      make(map[string]interface{}),
 		Timestamp:    time.Now(),
 		Priority:     0,

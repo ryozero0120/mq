@@ -31,7 +31,7 @@ func NewChannelPool(cfg PoolConfig, conn Connection) (ChannelPool, error) {
 	pool := &channelPool{
 		cfg:        cfg,
 		connection: conn,
-		channels:   make(chan *amqp.Channel, 1),
+		channels:   make(chan *amqp.Channel, cfg.Max),
 		closed:     false,
 	}
 

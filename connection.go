@@ -22,7 +22,7 @@ type Observer interface {
 }
 
 type connection struct {
-	cfg       ConnectionConfig
+	config    ConnectionConfig
 	conn      *amqp.Connection
 	observers []Observer
 	mu        sync.Mutex
@@ -38,12 +38,10 @@ type Connection interface {
 	Register(o Observer)
 }
 
-func NewConnection(cfg ConnectionConfig) Connection {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewConnection(ctx context.Context, config ConnectionConfig) Connection {
 	return &connection{
-		cfg:       cfg,
+		config:    config,
 		ctx:       ctx,
-		cancel:    cancel,
 		observers: make([]Observer, 0),
 		closeChan: make(chan *amqp.Error, 1),
 	}
@@ -60,8 +58,6 @@ func (c *connection) Connect() error {
 }
 
 func (c *connection) Close() error {
-	c.cancel()
-
 	if c.conn != nil && !c.conn.IsClosed() {
 		if err := c.conn.Close(); err != nil {
 			return fmt.Errorf("failed to close connection: %w", err)
@@ -88,10 +84,10 @@ func (c *connection) Register(o Observer) {
 
 func (c *connection) create() error {
 	amqpCfg := amqp.Config{
-		Heartbeat: c.cfg.Heartbeat,
+		Heartbeat: c.config.Heartbeat,
 	}
 
-	conn, err := amqp.DialConfig(c.cfg.URL, amqpCfg)
+	conn, err := amqp.DialConfig(c.config.URL, amqpCfg)
 	if err != nil {
 		return err
 	}
