@@ -39,6 +39,8 @@ func (b *Binding) Create(ctx context.Context) error {
 		return fmt.Errorf("acquire channel: %w", err)
 	}
 
+	defer b.channelPool.Release(channel)
+
 	err = channel.QueueBind(
 		b.config.Queue,
 		b.config.RoutingKey,

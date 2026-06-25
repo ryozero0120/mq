@@ -40,6 +40,7 @@ func (q *Queue) Declare(ctx context.Context) (amqp.Queue, error) {
 	if err != nil {
 		return amqp.Queue{}, fmt.Errorf("acquire channel: %w", err)
 	}
+	defer q.channelPool.Release(channel)
 
 	queue, err := channel.QueueDeclare(
 		q.config.Name,
