@@ -6,6 +6,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/observability"
 	"github.com/ryozero0120/mq/reliability"
 	"github.com/ryozero0120/mq/topology"
 	"github.com/ryozero0120/mq/worker"
@@ -13,6 +14,7 @@ import (
 
 type mq struct {
 	config          MqConfig
+	logger          observability.Logger
 	connManager     Connection
 	channelPool     ChannelPool
 	topologyManager topology.TopologyManager
@@ -27,7 +29,7 @@ type MQ interface {
 	Close() error
 }
 
-func NewMQ(ctx context.Context, config MqConfig) (MQ, error) {
+func NewMQ(ctx context.Context, config MqConfig, logger observability.Logger) (MQ, error) {
 	connManager := NewConnection(ctx, config.Connection)
 
 	if err := connManager.Connect(); err != nil {
@@ -43,6 +45,7 @@ func NewMQ(ctx context.Context, config MqConfig) (MQ, error) {
 
 	return &mq{
 		config:          config,
+		logger:          logger,
 		connManager:     connManager,
 		channelPool:     channelPool,
 		topologyManager: topologyManager,
@@ -67,7 +70,7 @@ func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, handler Me
 		ackManager = reliability.NewAckManager(reliability.AckConfig{})
 	}
 
-	subscriber := NewSubscriber(m.connManager, config, nil, workerPool, ackManager)
+	subscriber := NewSubscriber(m.connManager, config, m.logger, workerPool, ackManager)
 	subscriber.Subscribe(handler)
 
 	return subscriber
