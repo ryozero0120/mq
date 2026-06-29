@@ -67,7 +67,10 @@ func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, handler Me
 
 	var ackManager reliability.Acker
 	if !config.AutoAck {
-		ackManager = reliability.NewAckManager(reliability.AckConfig{})
+		ackManager = reliability.NewAckManager(reliability.AckConfig{
+			MultipleAck:   false,
+			RequeueOnNack: config.RequeueOnNack,
+		})
 	}
 
 	subscriber := NewSubscriber(m.connManager, config, m.logger, workerPool, ackManager)
