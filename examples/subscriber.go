@@ -36,7 +36,9 @@ func main() {
 				Min: 5,
 				Max: 20,
 			},
-		})
+		},
+		nil)
+
 	log.Print("ok")
 
 	if err != nil {

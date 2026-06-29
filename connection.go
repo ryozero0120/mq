@@ -3,12 +3,12 @@ package mq
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/observability"
 )
 
 type ConnectionConfig struct {
@@ -23,6 +23,7 @@ type Observer interface {
 
 type connection struct {
 	config    ConnectionConfig
+	logger    observability.Logger
 	conn      *amqp.Connection
 	observers []Observer
 	mu        sync.Mutex
@@ -38,9 +39,10 @@ type Connection interface {
 	Register(o Observer)
 }
 
-func NewConnection(ctx context.Context, config ConnectionConfig) Connection {
+func NewConnection(ctx context.Context, config ConnectionConfig, logger observability.Logger) Connection {
 	return &connection{
 		config:    config,
+		logger:    logger,
 		ctx:       ctx,
 		observers: make([]Observer, 0),
 		closeChan: make(chan *amqp.Error, 1),
@@ -137,13 +139,13 @@ func (c *connection) reconnect() {
 				connErr = fmt.Errorf("connection closed unexpectedly")
 			}
 
-			log.Printf("[ConnectionManager] connection lost: %v", connErr)
+			c.logger.Error("connection lost: %v", connErr)
 			c.onDisconnected()
 			if c.retry() {
 				c.onConnected()
-				log.Printf("[ConnectionManager] connection restored")
+				c.logger.Info("connection restored")
 			} else {
-				log.Printf("[ConnectionManager] reconnection failed, giving up")
+				c.logger.Error("connection reconnection failed, giving up")
 				return
 			}
 		}

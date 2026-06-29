@@ -30,7 +30,7 @@ type MQ interface {
 }
 
 func NewMQ(ctx context.Context, config MqConfig, logger observability.Logger) (MQ, error) {
-	connManager := NewConnection(ctx, config.Connection)
+	connManager := NewConnection(ctx, config.Connection, logger)
 
 	if err := connManager.Connect(); err != nil {
 		return nil, err

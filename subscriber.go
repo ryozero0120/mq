@@ -3,7 +3,6 @@ package mq
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -76,14 +75,14 @@ func (s *subscriber) Subscribe(handler MessageHandler) error {
 }
 
 func (s *subscriber) Start(ctx context.Context) error {
-	connection, err := s.conn.Get()
+	conn, err := s.conn.Get()
 	if err != nil {
 		return err
 	}
 
 	s.conn.Register(s)
 
-	s.ch, err = connection.Channel()
+	s.ch, err = conn.Channel()
 	if err != nil {
 		return err
 	}
@@ -98,7 +97,6 @@ func (s *subscriber) Start(ctx context.Context) error {
 		s.ch.Close()
 		return err
 	}
-	slog.Info("worker pool start11")
 
 	if s.workerPool != nil {
 		go s.workerPool.Start()
@@ -147,6 +145,7 @@ func (s *subscriber) applyMiddleware(ctx context.Context, msg *Message, index in
 }
 
 func (s *subscriber) onconnected() {
+	s.logger.Info("subscriber on connected")
 	s.Start(context.Background())
 }
 
