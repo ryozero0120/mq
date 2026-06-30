@@ -12,12 +12,15 @@ import (
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/ryozero0120/mq"
+	"github.com/ryozero0120/mq/channel"
+	"github.com/ryozero0120/mq/connection"
+	"github.com/ryozero0120/mq/delivery"
 	"github.com/ryozero0120/mq/topology"
 )
 
 type CdrHandler struct{}
 
-func (h *CdrHandler) Handle(ctx context.Context, m *mq.Message) error {
+func (h *CdrHandler) Handle(ctx context.Context, m *delivery.Message) error {
 	return nil
 }
 
@@ -28,11 +31,11 @@ func main() {
 	client, err := mq.NewMQ(
 		ctx,
 		mq.MqConfig{
-			Connection: mq.ConnectionConfig{
+			Connection: connection.ConnectionConfig{
 				URL:       "amqp://guest:guest@localhost:5672/",
 				Heartbeat: 10 * time.Second,
 			},
-			Pool: mq.PoolConfig{
+			Pool: channel.PoolConfig{
 				Min: 5,
 				Max: 20,
 			},

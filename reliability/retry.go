@@ -8,7 +8,7 @@ import (
 )
 
 type RetryPolicy interface {
-	ShouldRetry() bool
+	ShouldRetry(err error, attempt int) bool
 	NextDelay(attempt int) time.Duration
 	MaxAttempts() int
 }

@@ -1,4 +1,4 @@
-package mq
+package delivery
 
 import (
 	"time"
@@ -44,4 +44,12 @@ func NewMessage() *Message {
 		DeliveryMode: Persistent,
 		Context:      Context{},
 	}
+}
+
+func (m *Message) IncrRetryCount() {
+	m.Context.RetryCount++
+}
+
+func (m *Message) GetRetryCount() int {
+	return m.Context.RetryCount
 }

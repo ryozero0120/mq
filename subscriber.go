@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/connection"
+	"github.com/ryozero0120/mq/delivery"
 	"github.com/ryozero0120/mq/observability"
 	"github.com/ryozero0120/mq/reliability"
 	"github.com/ryozero0120/mq/worker"
@@ -22,12 +24,14 @@ type SubscriberConfig struct {
 }
 
 type subscriber struct {
-	conn        Connection
+	conn        connection.Connection
 	config      SubscriberConfig
 	logger      observability.Logger
 	handler     MessageHandler
-	workerPool  worker.Pool
 	ackManager  reliability.Acker
+	retryPolicy reliability.RetryPolicy
+	dlqHandler  reliability.DLQExecutor
+	workerPool  worker.Pool
 	middlewares []SubscriberMiddleware
 	ch          *amqp.Channel
 	deliveries  <-chan amqp.Delivery
@@ -43,25 +47,27 @@ type Subscriber interface {
 	Use(middleware SubscriberMiddleware)
 }
 
-type SubscriberFunc func(ctx context.Context, msg *Message) error
+type SubscriberFunc func(ctx context.Context, msg *delivery.Message) error
 
 type SubscriberMiddleware interface {
-	Intercept(ctx context.Context, msg *Message, next PublisherFunc) error
+	Intercept(ctx context.Context, msg *delivery.Message, next PublisherFunc) error
 }
 
 type MessageHandler interface {
-	Handle(ctx context.Context, m *Message) error
+	Handle(ctx context.Context, m *delivery.Message) error
 }
 
-type SubscribeHandler func(ctx context.Context, m *Message) error
+type SubscribeHandler func(ctx context.Context, m *delivery.Message) error
 
-func NewSubscriber(conn Connection, config SubscriberConfig, logger observability.Logger, workerPool worker.Pool, ackManager reliability.Acker) Subscriber {
+func NewSubscriber(conn connection.Connection, config SubscriberConfig, logger observability.Logger, ackManager reliability.Acker, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, workerPool worker.Pool) Subscriber {
 	return &subscriber{
-		conn:       conn,
-		config:     config,
-		logger:     logger,
-		workerPool: workerPool,
-		ackManager: ackManager,
+		conn:        conn,
+		config:      config,
+		logger:      logger,
+		ackManager:  ackManager,
+		retryPolicy: retryPolicy,
+		dlqHandler:  dlqHandler,
+		workerPool:  workerPool,
 	}
 }
 
@@ -133,23 +139,23 @@ func (s *subscriber) Use(mw SubscriberMiddleware) {
 	s.middlewares = append(s.middlewares, mw)
 }
 
-func (s *subscriber) applyMiddleware(ctx context.Context, msg *Message, index int, next SubscriberFunc) error {
+func (s *subscriber) applyMiddleware(ctx context.Context, msg *delivery.Message, index int, next SubscriberFunc) error {
 	if index >= len(s.middlewares) {
 		return next(ctx, msg)
 	}
 
 	middleware := s.middlewares[index]
-	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *Message) error {
+	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *delivery.Message) error {
 		return s.applyMiddleware(ctx, msg, index+1, next)
 	})
 }
 
-func (s *subscriber) onconnected() {
+func (s *subscriber) OnConnected() {
 	s.logger.Info("subscriber on connected")
 	s.Start(context.Background())
 }
 
-func (s *subscriber) ondisconnected() {
+func (s *subscriber) OnDisconnected() {
 	// s.Start(context.Background())
 }
 
@@ -209,7 +215,7 @@ func (s *subscriber) doDelivery(ctx context.Context, d amqp.Delivery) error {
 	return nil
 }
 
-func (s *subscriber) doMsg(ctx context.Context, msg *Message) error {
+func (s *subscriber) doMsg(ctx context.Context, msg *delivery.Message) error {
 	err := s.handler.Handle(ctx, msg)
 	if err != nil {
 		s.logger.Error("failed to do message", "error", err.Error())
@@ -217,20 +223,43 @@ func (s *subscriber) doMsg(ctx context.Context, msg *Message) error {
 	return err
 }
 
-func (s *subscriber) failed(_ context.Context, d amqp.Delivery, _ *Message, _ error) error {
+func (s *subscriber) failed(_ context.Context, d amqp.Delivery, m *delivery.Message, err error) error {
+	m.IncrRetryCount()
+
+	if s.retryPolicy.ShouldRetry(err, m.GetRetryCount()) {
+		s.logger.Warn("retrying message", "msg id", m.ID, "retry count", m.GetRetryCount())
+
+		// Nack with requeue
+		if !s.config.AutoAck && s.ackManager != nil {
+			s.ackManager.Nack(d, true)
+		}
+
+		return nil
+	}
+
+	//dlqHandler
+
+	// Nack without requeue
 	if !s.config.AutoAck && s.ackManager != nil {
 		s.ackManager.Nack(d, false)
 	}
+
 	return nil
 }
 
-func (s *subscriber) deliveryToMessage(d amqp.Delivery) *Message {
+// deliveryToMessage converts AMQP delivery to Message
+func (s *subscriber) deliveryToMessage(d amqp.Delivery) *delivery.Message {
 	headers := make(map[string]interface{})
 	for k, v := range d.Headers {
 		headers[k] = v
 	}
 
-	return &Message{
+	retryCount := 0
+	if rc, ok := headers["x-retry-count"].(int32); ok {
+		retryCount = int(rc)
+	}
+
+	return &delivery.Message{
 		ID:              d.MessageId,
 		Headers:         headers,
 		Body:            d.Body,
@@ -240,6 +269,11 @@ func (s *subscriber) deliveryToMessage(d amqp.Delivery) *Message {
 		ReplyTo:         d.ReplyTo,
 		Timestamp:       d.Timestamp,
 		Priority:        d.Priority,
-		DeliveryMode:    DeliveryMode(d.DeliveryMode),
+		DeliveryMode:    delivery.DeliveryMode(d.DeliveryMode),
+		Context: delivery.Context{
+			SpanID:     "",
+			TraceID:    "",
+			RetryCount: retryCount,
+		},
 	}
 }

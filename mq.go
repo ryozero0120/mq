@@ -6,6 +6,8 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/channel"
+	"github.com/ryozero0120/mq/connection"
 	"github.com/ryozero0120/mq/observability"
 	"github.com/ryozero0120/mq/reliability"
 	"github.com/ryozero0120/mq/topology"
@@ -15,8 +17,8 @@ import (
 type mq struct {
 	config          MqConfig
 	logger          observability.Logger
-	connManager     Connection
-	channelPool     ChannelPool
+	connManager     connection.Connection
+	channelPool     channel.ChannelPool
 	topologyManager topology.TopologyManager
 }
 
@@ -30,13 +32,13 @@ type MQ interface {
 }
 
 func NewMQ(ctx context.Context, config MqConfig, logger observability.Logger) (MQ, error) {
-	connManager := NewConnection(ctx, config.Connection, logger)
+	connManager := connection.NewConnection(ctx, config.Connection, logger)
 
 	if err := connManager.Connect(); err != nil {
 		return nil, err
 	}
 
-	channelPool, err := NewChannelPool(config.Pool, connManager)
+	channelPool, err := channel.NewChannelPool(config.Pool, connManager)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +75,14 @@ func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, handler Me
 		})
 	}
 
-	subscriber := NewSubscriber(m.connManager, config, m.logger, workerPool, ackManager)
+	retryPolicy := reliability.NewExponentialRetryPolicyWithConfig(
+		reliability.ExponentialRetryConfig{
+			MaxRetries: 3,
+		})
+
+	dlqHandler := reliability.NewDLQHandler()
+
+	subscriber := NewSubscriber(m.connManager, config, m.logger, ackManager, retryPolicy, dlqHandler, workerPool)
 	subscriber.Subscribe(handler)
 
 	return subscriber

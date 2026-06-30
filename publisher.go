@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/channel"
+	"github.com/ryozero0120/mq/delivery"
 )
 
 type PublisherConfig struct {
@@ -13,7 +15,7 @@ type PublisherConfig struct {
 }
 
 type publisher struct {
-	channelPool ChannelPool
+	channelPool channel.ChannelPool
 	config      PublisherConfig
 	middlewares []PublisherMiddleware
 
@@ -21,25 +23,25 @@ type publisher struct {
 }
 
 type Publisher interface {
-	Publish(ctx context.Context, msg *Message) error
+	Publish(ctx context.Context, msg *delivery.Message) error
 	Use(middleware PublisherMiddleware)
 	Close() error
 }
 
-type PublisherFunc func(ctx context.Context, msg *Message) error
+type PublisherFunc func(ctx context.Context, msg *delivery.Message) error
 
 type PublisherMiddleware interface {
-	Intercept(ctx context.Context, msg *Message, next PublisherFunc) error
+	Intercept(ctx context.Context, msg *delivery.Message, next PublisherFunc) error
 }
 
-func NewPublisher(config PublisherConfig, channelPool ChannelPool) Publisher {
+func NewPublisher(config PublisherConfig, channelPool channel.ChannelPool) Publisher {
 	return &publisher{
 		config:      config,
 		channelPool: channelPool,
 	}
 }
 
-func (p *publisher) Publish(ctx context.Context, msg *Message) error {
+func (p *publisher) Publish(ctx context.Context, msg *delivery.Message) error {
 	var err error
 	if len(p.middlewares) > 0 {
 		err = p.applyMiddleware(ctx, msg, 0, p.publish)
@@ -61,18 +63,18 @@ func (p *publisher) Close() error {
 	return nil
 }
 
-func (p *publisher) applyMiddleware(ctx context.Context, msg *Message, index int, next PublisherFunc) error {
+func (p *publisher) applyMiddleware(ctx context.Context, msg *delivery.Message, index int, next PublisherFunc) error {
 	if index >= len(p.middlewares) {
 		return next(ctx, msg)
 	}
 
 	middleware := p.middlewares[index]
-	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *Message) error {
+	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *delivery.Message) error {
 		return p.applyMiddleware(ctx, msg, index+1, next)
 	})
 }
 
-func (p *publisher) publish(ctx context.Context, msg *Message) error {
+func (p *publisher) publish(ctx context.Context, msg *delivery.Message) error {
 	ch, err := p.channelPool.Acquire(ctx)
 	if err != nil {
 		return err

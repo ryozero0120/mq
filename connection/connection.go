@@ -1,4 +1,4 @@
-package mq
+package connection
 
 import (
 	"context"
@@ -17,8 +17,8 @@ type ConnectionConfig struct {
 }
 
 type Observer interface {
-	onconnected()
-	ondisconnected()
+	OnConnected()
+	OnDisconnected()
 }
 
 type connection struct {
@@ -70,11 +70,15 @@ func (c *connection) Close() error {
 }
 
 func (c *connection) Get() (*amqp.Connection, error) {
-	if c.conn.IsClosed() {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+
+	if conn == nil || conn.IsClosed() {
 		return nil, fmt.Errorf("connection is closed")
 	}
 
-	return c.conn, nil
+	return conn, nil
 }
 
 func (c *connection) Register(o Observer) {
@@ -154,12 +158,12 @@ func (c *connection) reconnect() {
 
 func (c *connection) onDisconnected() {
 	for _, observer := range c.observers {
-		go observer.ondisconnected()
+		go observer.OnDisconnected()
 	}
 }
 
 func (c *connection) onConnected() {
 	for _, observer := range c.observers {
-		go observer.onconnected()
+		go observer.OnConnected()
 	}
 }
