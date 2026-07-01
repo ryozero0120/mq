@@ -125,7 +125,7 @@ func (p *WorkerPool) executeJob(job Job) {
 	var cancel context.CancelFunc
 
 	if p.config.JobTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, p.config.JobTimeout*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, p.config.JobTimeout)
 		defer cancel()
 	}
 
