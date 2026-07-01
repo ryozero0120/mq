@@ -18,7 +18,7 @@ type Config struct {
 	Workers         int
 	QueueSize       int
 	ShutdownTimeout time.Duration
-	JobTimout       time.Duration
+	JobTimeout      time.Duration
 	OnJobError      func(err error)
 }
 
@@ -124,8 +124,8 @@ func (p *WorkerPool) executeJob(job Job) {
 	ctx := context.Background()
 	var cancel context.CancelFunc
 
-	if p.config.JobTimout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, p.config.JobTimout*time.Second)
+	if p.config.JobTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, p.config.JobTimeout*time.Second)
 		defer cancel()
 	}
 

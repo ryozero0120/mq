@@ -62,7 +62,7 @@ func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, retryPolic
 				Workers:         runtime.NumCPU(),
 				QueueSize:       runtime.NumCPU() * 8,
 				ShutdownTimeout: 10 * time.Second,
-				JobTimout:       5 * time.Second,
+				JobTimeout:      5 * time.Second,
 				OnJobError: func(err error) {
 					fmt.Print(err)
 				},
