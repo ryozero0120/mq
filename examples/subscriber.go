@@ -36,8 +36,11 @@ func main() {
 				Heartbeat: 10 * time.Second,
 			},
 			Pool: channel.PoolConfig{
-				Min: 5,
-				Max: 20,
+				Min:            5,
+				Max:            20,
+				IdleTimeout:    30 * time.Second,
+				MaxLifetime:    5 * time.Minute,
+				AcquireTimeout: 5 * time.Second,
 			},
 		},
 		nil)
@@ -97,12 +100,12 @@ func main() {
 			Queue:         queue.Name,
 			Tag:           fmt.Sprintf("C1_%s", time.Now().String()),
 			AutoAck:       false,
-			Concurrency:   5,
-			PrefetchCount: 5 * 8,
+			PrefetchCount: runtime.NumCPU() * 8,
 			RequeueOnNack: true,
 		},
 		nil, // retry policy
 		nil, // dlqHandler
+		nil, // workerPool
 		hanlder,
 	)
 

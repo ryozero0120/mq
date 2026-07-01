@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/ryozero0120/mq/channel"
@@ -24,6 +25,7 @@ type QueueConfig struct {
 type Queue struct {
 	config      QueueConfig
 	channelPool channel.ChannelPool
+	declared    atomic.Bool
 	mu          sync.Mutex
 }
 
@@ -57,6 +59,10 @@ func (q *Queue) Declare(ctx context.Context) (amqp.Queue, error) {
 	}
 
 	return queue, nil
+}
+
+func (e *Queue) IsDeclared() bool {
+	return e.declared.Load()
 }
 
 // buildArgs merges user arguments with dead-letter arguments derived from the

@@ -4,7 +4,7 @@
 //   - Mỗi lần fail: publish bản copy (x-retry-count+1) vào queue delay
 //     "orders.q.delay.{ttl}" (x-message-ttl = NextDelay, DLX về queue gốc).
 //     => FixedRetryPolicy: delay cố định 1s mỗi lần retry (broker giữ chỗ,
-//        không block worker; mọi lần retry dùng chung 1 delay queue).
+//     không block worker; mọi lần retry dùng chung 1 delay queue).
 //   - Sau MaxRetries: đẩy sang DLQ (exchange "dlq" / queue "dlq.v1").
 //
 // Một watcher consume "dlq.v1" để in message dead-letter.
@@ -90,7 +90,6 @@ func main() {
 			Queue:         "orders.q",
 			Tag:           "orders-consumer",
 			AutoAck:       false,
-			Concurrency:   1,
 			PrefetchCount: 1,
 			RequeueOnNack: false,
 		},
@@ -99,17 +98,19 @@ func main() {
 			Delay:      1000 * time.Millisecond,
 		}),
 		nil, // dlqHandler mặc định
+		nil, // workerPool mặc định
 		failingHandler{},
 	)
 	must(sub.Start(ctx), "start orders subscriber")
 
 	// watcher DLQ
 	watch := client.Subscriber(ctx,
-		mq.SubscriberConfig{Queue: "dlq.v1", Tag: "dlq-watcher", AutoAck: false, Concurrency: 1, PrefetchCount: 1},
+		mq.SubscriberConfig{Queue: "dlq.v1", Tag: "dlq-watcher", AutoAck: false, PrefetchCount: 1},
 		reliability.NewFixedRetryPolicyWithConfig(reliability.FixedRetryConfig{
 			MaxRetries: 1,
 			Delay:      1000 * time.Millisecond,
 		}),
+		nil,
 		nil,
 		dlqWatcher{},
 	)

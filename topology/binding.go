@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/ryozero0120/mq/channel"
@@ -21,6 +22,7 @@ type BindingConfig struct {
 type Binding struct {
 	config      BindingConfig
 	channelPool channel.ChannelPool
+	declared    atomic.Bool
 	mu          sync.Mutex
 }
 
@@ -54,4 +56,8 @@ func (b *Binding) Create(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (e *Binding) IsDeclared() bool {
+	return e.declared.Load()
 }

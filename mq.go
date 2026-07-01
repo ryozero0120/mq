@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -23,7 +24,7 @@ type mq struct {
 }
 
 type MQ interface {
-	Subscriber(ctx context.Context, config SubscriberConfig, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, handler MessageHandler) Subscriber
+	Subscriber(ctx context.Context, config SubscriberConfig, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, workerPool worker.Pool, handler MessageHandler) Subscriber
 	Publisher(config PublisherConfig) Publisher
 	DeclareExchange(ctx context.Context, config topology.ExchangeConfig) error
 	DeclareQueue(ctx context.Context, config topology.QueueConfig) (amqp.Queue, error)
@@ -54,18 +55,20 @@ func NewMQ(ctx context.Context, config MqConfig, logger observability.Logger) (M
 	}, nil
 }
 
-func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, handler MessageHandler) Subscriber {
-	workerPool := worker.NewWorkerPool(
-		worker.Config{
-			Workers:         config.Concurrency,
-			QueueSize:       config.Concurrency * 8,
-			ShutdownTimeout: 10 * time.Second,
-			JobTimout:       5 * time.Second,
-			OnJobError: func(err error) {
-				fmt.Print(err)
+func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, workerPool worker.Pool, handler MessageHandler) Subscriber {
+	if workerPool == nil {
+		workerPool = worker.NewWorkerPool(
+			worker.Config{
+				Workers:         runtime.NumCPU(),
+				QueueSize:       runtime.NumCPU() * 8,
+				ShutdownTimeout: 10 * time.Second,
+				JobTimout:       5 * time.Second,
+				OnJobError: func(err error) {
+					fmt.Print(err)
+				},
 			},
-		},
-	)
+		)
+	}
 
 	var ackManager reliability.Acker
 	if !config.AutoAck {

@@ -33,9 +33,9 @@ func (f *fakeConn) Register(o connection.Observer) {
 	f.mu.Unlock()
 }
 
-func newTestPool(t *testing.T, cfg PoolConfig) ChannelPool {
+func newTestPool(t *testing.T, config PoolConfig) ChannelPool {
 	t.Helper()
-	p, err := New(cfg, &fakeConn{getErr: errors.New("no broker")})
+	p, err := New(config, &fakeConn{getErr: errors.New("no broker")})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -99,6 +99,17 @@ func TestConcurrentAcquireClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	wg.Wait() // tất cả waiter phải được đánh thức qua done
+}
+
+func TestAcquireTimeout(t *testing.T) {
+	// Max=0 → không tạo được channel; AcquireTimeout phải bắn ErrAcquireTimeout.
+	p := newTestPool(t, PoolConfig{Min: 0, Max: 0, AcquireTimeout: 50 * time.Millisecond})
+	defer p.Close()
+
+	_, err := p.Acquire(context.Background())
+	if !errors.Is(err, ErrAcquireTimeout) {
+		t.Fatalf("want ErrAcquireTimeout, got %v", err)
+	}
 }
 
 func TestNewWarmError(t *testing.T) {
