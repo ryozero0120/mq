@@ -20,7 +20,7 @@ import (
 
 type CdrHandler struct{}
 
-func (h *CdrHandler) Handle(ctx context.Context, m *delivery.Message) error {
+func (h *CdrHandler) Handle(ctx context.Context, m *delivery.DM) error {
 	return nil
 }
 
@@ -101,6 +101,8 @@ func main() {
 			PrefetchCount: 5 * 8,
 			RequeueOnNack: true,
 		},
+		nil, // retry policy
+		nil, // dlqHandler
 		hanlder,
 	)
 

@@ -39,7 +39,7 @@ type Connection interface {
 	Register(o Observer)
 }
 
-func NewConnection(ctx context.Context, config ConnectionConfig, logger observability.Logger) Connection {
+func New(ctx context.Context, config ConnectionConfig, logger observability.Logger) Connection {
 	return &connection{
 		config:    config,
 		logger:    logger,

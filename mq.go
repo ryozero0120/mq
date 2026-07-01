@@ -15,15 +15,15 @@ import (
 )
 
 type mq struct {
-	config          MqConfig
-	logger          observability.Logger
-	connManager     connection.Connection
-	channelPool     channel.ChannelPool
-	topologyManager topology.TopologyManager
+	config      MqConfig
+	logger      observability.Logger
+	conn        connection.Connection
+	channelPool channel.ChannelPool
+	topology    topology.TopologyInstaller
 }
 
 type MQ interface {
-	Subscriber(ctx context.Context, config SubscriberConfig, handler MessageHandler) Subscriber
+	Subscriber(ctx context.Context, config SubscriberConfig, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, handler MessageHandler) Subscriber
 	Publisher(config PublisherConfig) Publisher
 	DeclareExchange(ctx context.Context, config topology.ExchangeConfig) error
 	DeclareQueue(ctx context.Context, config topology.QueueConfig) (amqp.Queue, error)
@@ -32,29 +32,29 @@ type MQ interface {
 }
 
 func NewMQ(ctx context.Context, config MqConfig, logger observability.Logger) (MQ, error) {
-	connManager := connection.NewConnection(ctx, config.Connection, logger)
+	conn := connection.New(ctx, config.Connection, logger)
 
-	if err := connManager.Connect(); err != nil {
+	if err := conn.Connect(); err != nil {
 		return nil, err
 	}
 
-	channelPool, err := channel.NewChannelPool(config.Pool, connManager)
+	channelPool, err := channel.New(config.Pool, conn)
 	if err != nil {
 		return nil, err
 	}
 
-	topologyManager := topology.NewTopologyManager(nil, channelPool)
+	topology := topology.New(logger, channelPool)
 
 	return &mq{
-		config:          config,
-		logger:          logger,
-		connManager:     connManager,
-		channelPool:     channelPool,
-		topologyManager: topologyManager,
+		config:      config,
+		logger:      logger,
+		conn:        conn,
+		channelPool: channelPool,
+		topology:    topology,
 	}, nil
 }
 
-func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, handler MessageHandler) Subscriber {
+func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, retryPolicy reliability.RetryPolicy, dlqHandler reliability.DLQExecutor, handler MessageHandler) Subscriber {
 	workerPool := worker.NewWorkerPool(
 		worker.Config{
 			Workers:         config.Concurrency,
@@ -75,14 +75,15 @@ func (m *mq) Subscriber(ctx context.Context, config SubscriberConfig, handler Me
 		})
 	}
 
-	retryPolicy := reliability.NewExponentialRetryPolicyWithConfig(
-		reliability.ExponentialRetryConfig{
-			MaxRetries: 3,
-		})
+	if retryPolicy == nil {
+		retryPolicy = reliability.NewFixedRetryPolicyWithConfig(
+			reliability.FixedRetryConfig{
+				MaxRetries: 3,
+				Delay:      1000 * time.Millisecond,
+			})
+	}
 
-	dlqHandler := reliability.NewDLQHandler()
-
-	subscriber := NewSubscriber(m.connManager, config, m.logger, ackManager, retryPolicy, dlqHandler, workerPool)
+	subscriber := NewSubscriber(m.conn, m.channelPool, config, m.logger, ackManager, m.topology, retryPolicy, dlqHandler, workerPool)
 	subscriber.Subscribe(handler)
 
 	return subscriber
@@ -93,15 +94,15 @@ func (m *mq) Publisher(config PublisherConfig) Publisher {
 }
 
 func (m *mq) DeclareExchange(ctx context.Context, config topology.ExchangeConfig) error {
-	return m.topologyManager.DeclareExchange(ctx, config)
+	return m.topology.DeclareExchange(ctx, config)
 }
 
 func (m *mq) DeclareQueue(ctx context.Context, config topology.QueueConfig) (amqp.Queue, error) {
-	return m.topologyManager.DeclareQueue(ctx, config)
+	return m.topology.DeclareQueue(ctx, config)
 }
 
 func (m *mq) CreateBinding(ctx context.Context, config topology.BindingConfig) error {
-	return m.topologyManager.CreateBinding(ctx, config)
+	return m.topology.CreateBinding(ctx, config)
 }
 
 func (m *mq) Close() error {
@@ -111,8 +112,8 @@ func (m *mq) Close() error {
 		mErr = append(mErr, fmt.Errorf("channel pool close error: %w", err))
 	}
 
-	if err := m.connManager.Close(); err != nil {
-		mErr = append(mErr, fmt.Errorf("connManager close error: %w", err))
+	if err := m.conn.Close(); err != nil {
+		mErr = append(mErr, fmt.Errorf("connection close error: %w", err))
 	}
 
 	if len(mErr) > 0 {

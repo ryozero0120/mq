@@ -37,6 +37,11 @@ func NewExponentialRetryPolicyWithConfig(config ExponentialRetryConfig) *Exponen
 		jitter = 0.2
 	}
 
+	multiplier := config.Multiplier
+	if multiplier == 0 {
+		multiplier = 2.0
+	}
+
 	retryableErrors := config.RetryableErrors
 	if len(retryableErrors) == 0 {
 		retryableErrors = []string{
@@ -56,6 +61,7 @@ func NewExponentialRetryPolicyWithConfig(config ExponentialRetryConfig) *Exponen
 		maxRetries:      config.MaxRetries,
 		initialDelay:    config.InitialDelay,
 		maxDelay:        config.MaxDelay,
+		multiplier:      multiplier,
 		jitterFraction:  jitter,
 		retryableErrors: retryableErrors,
 	}
@@ -101,6 +107,72 @@ func (p *ExponentialRetryPolicy) MaxAttempts() int {
 }
 
 func (p *ExponentialRetryPolicy) isRetryableError(err error) bool {
+	errMsg := strings.ToLower(err.Error())
+	for _, kw := range p.retryableErrors {
+		if strings.Contains(errMsg, kw) {
+			return true
+		}
+	}
+	return true
+}
+
+type FixedRetryPolicy struct {
+	maxRetries      int
+	delay           time.Duration
+	retryableErrors []string
+}
+
+type FixedRetryConfig struct {
+	MaxRetries      int
+	Delay           time.Duration
+	RetryableErrors []string
+}
+
+func NewFixedRetryPolicyWithConfig(config FixedRetryConfig) *FixedRetryPolicy {
+	retryableErrors := config.RetryableErrors
+	if len(retryableErrors) == 0 {
+		retryableErrors = []string{
+			"timeout",
+			"temporary",
+			"connection refused",
+			"connection reset",
+			"broken pipe",
+			"no such host",
+			"service unavailable",
+			"too many requests",
+			"rate limit",
+		}
+	}
+
+	return &FixedRetryPolicy{
+		maxRetries:      config.MaxRetries,
+		delay:           config.Delay,
+		retryableErrors: retryableErrors,
+	}
+}
+
+func (p *FixedRetryPolicy) ShouldRetry(err error, attempt int) bool {
+	if err == nil {
+		return false
+	}
+
+	if attempt > p.maxRetries {
+		return false
+	}
+
+	// Check if error is retryable
+	return p.isRetryableError(err)
+}
+
+func (p *FixedRetryPolicy) NextDelay(attempt int) time.Duration {
+	return p.delay
+}
+
+func (p *FixedRetryPolicy) MaxAttempts() int {
+	return p.maxRetries
+}
+
+func (p *FixedRetryPolicy) isRetryableError(err error) bool {
 	errMsg := strings.ToLower(err.Error())
 	for _, kw := range p.retryableErrors {
 		if strings.Contains(errMsg, kw) {

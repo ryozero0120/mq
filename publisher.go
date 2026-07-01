@@ -23,15 +23,15 @@ type publisher struct {
 }
 
 type Publisher interface {
-	Publish(ctx context.Context, msg *delivery.Message) error
+	Publish(ctx context.Context, msg *delivery.DM) error
 	Use(middleware PublisherMiddleware)
 	Close() error
 }
 
-type PublisherFunc func(ctx context.Context, msg *delivery.Message) error
+type PublisherFunc func(ctx context.Context, msg *delivery.DM) error
 
 type PublisherMiddleware interface {
-	Intercept(ctx context.Context, msg *delivery.Message, next PublisherFunc) error
+	Intercept(ctx context.Context, msg *delivery.DM, next PublisherFunc) error
 }
 
 func NewPublisher(config PublisherConfig, channelPool channel.ChannelPool) Publisher {
@@ -41,7 +41,7 @@ func NewPublisher(config PublisherConfig, channelPool channel.ChannelPool) Publi
 	}
 }
 
-func (p *publisher) Publish(ctx context.Context, msg *delivery.Message) error {
+func (p *publisher) Publish(ctx context.Context, msg *delivery.DM) error {
 	var err error
 	if len(p.middlewares) > 0 {
 		err = p.applyMiddleware(ctx, msg, 0, p.publish)
@@ -63,18 +63,18 @@ func (p *publisher) Close() error {
 	return nil
 }
 
-func (p *publisher) applyMiddleware(ctx context.Context, msg *delivery.Message, index int, next PublisherFunc) error {
+func (p *publisher) applyMiddleware(ctx context.Context, msg *delivery.DM, index int, next PublisherFunc) error {
 	if index >= len(p.middlewares) {
 		return next(ctx, msg)
 	}
 
 	middleware := p.middlewares[index]
-	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *delivery.Message) error {
+	return middleware.Intercept(ctx, msg, func(ctx context.Context, msg *delivery.DM) error {
 		return p.applyMiddleware(ctx, msg, index+1, next)
 	})
 }
 
-func (p *publisher) publish(ctx context.Context, msg *delivery.Message) error {
+func (p *publisher) publish(ctx context.Context, msg *delivery.DM) error {
 	ch, err := p.channelPool.Acquire(ctx)
 	if err != nil {
 		return err

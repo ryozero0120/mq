@@ -4,33 +4,29 @@ import (
 	"context"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/channel"
 	"github.com/ryozero0120/mq/observability"
 )
 
-type ChannelProvider interface {
-	Acquire(ctx context.Context) (*amqp.Channel, error)
-	Release(ch *amqp.Channel) error
-}
-
-type TopologyManager interface {
+type TopologyInstaller interface {
 	DeclareExchange(ctx context.Context, config ExchangeConfig) error
 	DeclareQueue(ctx context.Context, config QueueConfig) (amqp.Queue, error)
 	CreateBinding(ctx context.Context, config BindingConfig) error
 }
 
-type topologyManager struct {
+type topology struct {
 	logger      observability.Logger
-	channelPool ChannelProvider
+	channelPool channel.ChannelPool
 }
 
-func NewTopologyManager(logger observability.Logger, channelPool ChannelProvider) TopologyManager {
-	return &topologyManager{
+func New(logger observability.Logger, channelPool channel.ChannelPool) TopologyInstaller {
+	return &topology{
 		logger:      logger,
 		channelPool: channelPool,
 	}
 }
 
-func (m *topologyManager) DeclareExchange(ctx context.Context, config ExchangeConfig) error {
+func (m *topology) DeclareExchange(ctx context.Context, config ExchangeConfig) error {
 	exchange := NewExchange(
 		config,
 		m.channelPool,
@@ -42,7 +38,7 @@ func (m *topologyManager) DeclareExchange(ctx context.Context, config ExchangeCo
 	return nil
 }
 
-func (m *topologyManager) DeclareQueue(ctx context.Context, config QueueConfig) (amqp.Queue, error) {
+func (m *topology) DeclareQueue(ctx context.Context, config QueueConfig) (amqp.Queue, error) {
 	queue := NewQueue(
 		config,
 		m.channelPool,
@@ -54,7 +50,7 @@ func (m *topologyManager) DeclareQueue(ctx context.Context, config QueueConfig) 
 	return q, nil
 }
 
-func (m *topologyManager) CreateBinding(ctx context.Context, config BindingConfig) error {
+func (m *topology) CreateBinding(ctx context.Context, config BindingConfig) error {
 	binding := NewBinding(
 		config,
 		m.channelPool,

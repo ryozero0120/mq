@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/channel"
+	"github.com/ryozero0120/mq/reliability"
 )
 
 // QueueConfig describes a queue to declare.
@@ -16,16 +18,16 @@ type QueueConfig struct {
 	Exclusive  bool
 	NoWait     bool
 	Arguments  map[string]interface{}
-	// DLQ        *DLQConfig
+	DLQ        *reliability.DLQConfig
 }
 
 type Queue struct {
 	config      QueueConfig
-	channelPool ChannelProvider
+	channelPool channel.ChannelPool
 	mu          sync.Mutex
 }
 
-func NewQueue(config QueueConfig, channelPool ChannelProvider) *Queue {
+func NewQueue(config QueueConfig, channelPool channel.ChannelPool) *Queue {
 	return &Queue{
 		config:      config,
 		channelPool: channelPool,
@@ -48,11 +50,33 @@ func (q *Queue) Declare(ctx context.Context) (amqp.Queue, error) {
 		q.config.AutoDelete,
 		q.config.Exclusive,
 		q.config.NoWait,
-		amqp.Table(q.config.Arguments),
+		q.buildArgs(),
 	)
 	if err != nil {
 		return amqp.Queue{}, fmt.Errorf("queue declare: %w", err)
 	}
 
 	return queue, nil
+}
+
+// buildArgs merges user arguments with dead-letter arguments derived from the
+// DLQ config.
+func (q *Queue) buildArgs() amqp.Table {
+	args := amqp.Table{}
+	for k, v := range q.config.Arguments {
+		args[k] = v
+	}
+
+	if q.config.DLQ != nil {
+		if q.config.DLQ.Exchange != "" {
+			args["x-dead-letter-exchange"] = q.config.DLQ.Exchange
+		}
+		rk := q.config.DLQ.RoutingKey
+		if rk == "" {
+			rk = q.config.Name
+		}
+		args["x-dead-letter-routing-key"] = rk
+	}
+
+	return args
 }

@@ -33,7 +33,7 @@ type ChannelPool interface {
 	Close() error
 }
 
-func NewChannelPool(cfg PoolConfig, conn connection.Connection) (ChannelPool, error) {
+func New(cfg PoolConfig, conn connection.Connection) (ChannelPool, error) {
 	pool := &channelPool{
 		cfg:        cfg,
 		connection: conn,

@@ -21,7 +21,7 @@ type Context struct {
 	RetryCount int
 }
 
-type Message struct {
+type DM struct {
 	ID              string
 	Headers         map[string]interface{}
 	Body            []byte
@@ -35,8 +35,8 @@ type Message struct {
 	Context         Context
 }
 
-func NewMessage() *Message {
-	return &Message{
+func NewDM() *DM {
+	return &DM{
 		ID:           uuid.New().String(),
 		Headers:      make(map[string]interface{}),
 		Timestamp:    time.Now(),
@@ -46,10 +46,10 @@ func NewMessage() *Message {
 	}
 }
 
-func (m *Message) IncrRetryCount() {
+func (m *DM) IncrRetryCount() {
 	m.Context.RetryCount++
 }
 
-func (m *Message) GetRetryCount() int {
+func (m *DM) GetRetryCount() int {
 	return m.Context.RetryCount
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/channel"
 )
 
 // BindingConfig describes a queue-to-exchange binding.
@@ -19,11 +20,11 @@ type BindingConfig struct {
 
 type Binding struct {
 	config      BindingConfig
-	channelPool ChannelProvider
+	channelPool channel.ChannelPool
 	mu          sync.Mutex
 }
 
-func NewBinding(config BindingConfig, channelPool ChannelProvider) *Binding {
+func NewBinding(config BindingConfig, channelPool channel.ChannelPool) *Binding {
 	return &Binding{
 		config:      config,
 		channelPool: channelPool,

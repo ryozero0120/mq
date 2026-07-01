@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/ryozero0120/mq/channel"
 )
 
 // Exchange types supported by AMQP.
@@ -29,11 +30,11 @@ type ExchangeConfig struct {
 
 type Exchange struct {
 	config      ExchangeConfig
-	channelPool ChannelProvider
+	channelPool channel.ChannelPool
 	mu          sync.Mutex
 }
 
-func NewExchange(config ExchangeConfig, channelPool ChannelProvider) *Exchange {
+func NewExchange(config ExchangeConfig, channelPool channel.ChannelPool) *Exchange {
 	return &Exchange{
 		config:      config,
 		channelPool: channelPool,
